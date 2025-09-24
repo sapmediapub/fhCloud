@@ -1,4 +1,4 @@
-const BACKEND_URL = "https://fhcloud.onrender.com/recognize";
+const BACKEND_URL = "https://fhcloud.onrender.com/recognize"; 
 
 export async function recognizeSong(file: File) {
   const formData = new FormData();
