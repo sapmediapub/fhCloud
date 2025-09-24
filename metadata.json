@@ -1,0 +1,7 @@
+{
+  "name": "Copy of FH Cloud",
+  "description": "An audio detection and song matching service to identify music, check for infringement, and monitor live broadcasts.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
