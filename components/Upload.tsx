@@ -1,23 +1,27 @@
 import React, { useState } from "react";
 import { recognizeSong } from "../services/api";
 
-export default function Upload() {
+const Upload: React.FC = () => {
+  const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setFile(e.target.files[0]);
+    }
+  };
+
+  const handleUpload = async () => {
     if (!file) return;
-
     setLoading(true);
-    setError(null);
 
     try {
-      const data = await recognizeSong(file);
-      setResult(data);
-    } catch (err: any) {
-      setError(err.message || "Something went wrong");
+      const res = await recognizeSong(file);
+      setResult(res);
+    } catch (err) {
+      console.error(err);
+      alert("Upload failed!");
     } finally {
       setLoading(false);
     }
@@ -25,13 +29,17 @@ export default function Upload() {
 
   return (
     <div>
-      <h2>Upload a Song</h2>
+      <h2>Upload Audio</h2>
       <input type="file" accept="audio/*" onChange={handleFileChange} />
-      {loading && <p>Analyzing...</p>}
-      {error && <p style={{ color: "red" }}>{error}</p>}
+      <button onClick={handleUpload} disabled={!file || loading}>
+        {loading ? "Uploading..." : "Upload"}
+      </button>
+
       {result && (
         <pre>{JSON.stringify(result, null, 2)}</pre>
       )}
     </div>
   );
-}
+};
+
+export default Upload;
