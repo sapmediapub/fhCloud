@@ -16,10 +16,12 @@ async function createSignature(stringToSign: string, secretKey: string): Promise
 }
 
 
+// Fix: Changed return type of identifySongWithAcrCloud to Promise<SongDetails> as it always returns the 'match' property,
+// resolving a type incompatibility where it was being used.
 export const identifySongWithAcrCloud = async (
     audioData: { data: string },
     credentials: { host: string; accessKey: string; secretKey: string }
-): Promise<Partial<SongDetails>> => {
+): Promise<SongDetails> => {
     const { host, accessKey, secretKey } = credentials;
 
     const endpoint = `/v1/identify`;
@@ -57,14 +59,14 @@ export const identifySongWithAcrCloud = async (
 
     if (result.status.code !== 0) {
         if (result.status.code === 1001) { // No result
-             return { match: false, reasoning: 'No match found by ACRCloud.' };
+             return { match: false, reasoning: 'No match found by FH Cloud.' };
         }
         throw new Error(`ACRCloud Error: ${result.status.msg}`);
     }
 
     const metadata = result.metadata?.music?.[0];
     if (!metadata) {
-        return { match: false, reasoning: 'No match found by ACRCloud.' };
+        return { match: false, reasoning: 'No match found by FH Cloud.' };
     }
     
     const artists = metadata.artists?.map((a: { name: string }) => a.name).join(', ') || undefined;

@@ -4,17 +4,22 @@ import HomeView from './components/HomeView';
 import IdentifyView from './components/tabs/IdentifyView';
 import InfringementView from './components/tabs/InfringementView';
 import MonitoringView from './components/tabs/MonitoringView';
-import AuthenticationView from './components/tabs/AuthenticationView';
+import ApiSettingsView from './components/tabs/ApiSettingsView';
 import Loader from './components/Loader';
 import ResultsDisplay from './components/ResultsDisplay';
 import ErrorToast from './components/ErrorToast';
-import { identifySong, checkForInfringement, findSongUsage } from './services/geminiService';
+import { identifySong, checkForInfringement, findSongUsage, transcribeAudio } from './services/geminiService';
 import { identifySongWithAcrCloud } from './services/acrcloudService';
 import { ApiResult, AudioData, SongDetails, AcrCredentials } from './types';
 
-type Tab = 'identify' | 'enforcement' | 'monitoring' | 'authentication';
+type Tab = 'identify' | 'enforcement' | 'monitoring' | 'apiSettings';
 type AppState = 'idle' | 'loading' | 'results' | 'error';
 type ApiOperation = 'identify' | 'infringe' | 'usage';
+
+interface IdentifyOptions {
+  type: 'fingerprint' | 'music' | 'speech';
+  includeCovers?: boolean;
+}
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('identify');
@@ -39,46 +44,57 @@ const App: React.FC = () => {
     }
   };
 
-  const handleIdentify = (audioData: AudioData, acrCredentials: AcrCredentials) => {
+  const handleIdentify = (audioData: AudioData, acrCredentials: AcrCredentials, options: IdentifyOptions) => {
     const apiFunction = async (): Promise<ApiResult> => {
-        // Step 1: Identify with ACRCloud
-        const acrResult = await identifySongWithAcrCloud(audioData, acrCredentials);
-
-        // Step 2: If match with ISRC, enrich with Gemini for deep details
-        if (acrResult.match && acrResult.isrc && acrResult.title && acrResult.artist) {
-            const enrichedResult = await identifySong(audioData, {
-                title: acrResult.title,
-                artist: acrResult.artist,
-                album: acrResult.album || '',
-                isrc: acrResult.isrc,
-            });
-
-            // Combine results, prioritizing ACRCloud's core data but taking Gemini's enrichment
-            return {
-                ...enrichedResult,
-                ...acrResult,
-                match: true,
-            };
+        if (options.type === 'speech') {
+            return await transcribeAudio(audioData);
         }
 
-        // If no match or no ISRC, return ACRCloud result directly
-        return acrResult as SongDetails;
+        if (options.type === 'fingerprint') {
+            // Only use ACRCloud for a direct, exact match.
+            return await identifySongWithAcrCloud(audioData, acrCredentials);
+        }
+
+        // Music identification flow (options.type === 'music')
+        const acrResult = await identifySongWithAcrCloud(audioData, acrCredentials);
+
+        if (acrResult.match && acrResult.isrc && acrResult.title && acrResult.artist) {
+            // We have a good ACRCloud match, now enrich it.
+            const enrichedResult = await identifySong(audioData, {
+                details: {
+                  title: acrResult.title,
+                  artist: acrResult.artist,
+                  album: acrResult.album || '',
+                  isrc: acrResult.isrc,
+                },
+                includeCovers: options.includeCovers
+            });
+            
+            // Combine, prioritizing ACR core data, but taking Gemini's deeper metadata and reasoning.
+            return {
+                ...acrResult, // UPC, releaseDate, etc. from ACR
+                ...enrichedResult, // writers, producers, reasoning, etc. from Gemini
+                match: true,
+            };
+        } else if (options.includeCovers) {
+            // ACRCloud failed or gave a partial match, but user wants to check for covers with Gemini.
+            const geminiResult = await identifySong(audioData, { includeCovers: true });
+            if (!geminiResult.match && geminiResult.reasoning) {
+                return { ...acrResult, match: false, reasoning: `FH Cloud (Fingerprint): No match found.\nGemini (Analysis): ${geminiResult.reasoning}`};
+            }
+            return geminiResult;
+        }
+
+        // ACRCloud failed and not checking for covers, or ACR returned a partial match without ISRC.
+        return acrResult;
     };
     handleApiCall(apiFunction, 'identify');
   };
 
-  const handleInfringement = (audioData: AudioData, acrCredentials: AcrCredentials) => {
+  const handleInfringement = (queryAudio: AudioData, referenceAudio: AudioData) => {
      const apiFunction = async (): Promise<ApiResult> => {
-        // Step 1: Identify the source audio with ACRCloud
-        const acrResult = await identifySongWithAcrCloud(audioData, acrCredentials);
-
-        // Step 2: If match, perform a targeted infringement check with Gemini
-        if (acrResult.match && acrResult.title && acrResult.artist) {
-            return await checkForInfringement(audioData, acrResult);
-        }
-
-        // If no match from ACRCloud, fall back to Gemini's general identify-and-compare
-        return await checkForInfringement(audioData);
+        // Perform a direct, targeted infringement check between the two provided audio clips.
+        return await checkForInfringement(queryAudio, referenceAudio);
     };
     handleApiCall(apiFunction, 'infringe');
   };
@@ -128,8 +144,8 @@ const App: React.FC = () => {
 interface TabsViewProps {
   activeTab: Tab;
   setActiveTab: (tab: Tab) => void;
-  onIdentify: (audioData: AudioData, acrCredentials: AcrCredentials) => void;
-  onInfringement: (audioData: AudioData, acrCredentials: AcrCredentials) => void;
+  onIdentify: (audioData: AudioData, acrCredentials: AcrCredentials, options: IdentifyOptions) => void;
+  onInfringement: (queryAudio: AudioData, referenceAudio: AudioData) => void;
 }
 
 const TabsView: React.FC<TabsViewProps> = ({ activeTab, setActiveTab, onIdentify, onInfringement }) => {
@@ -137,7 +153,7 @@ const TabsView: React.FC<TabsViewProps> = ({ activeTab, setActiveTab, onIdentify
     { id: 'identify', label: 'Identification' },
     { id: 'enforcement', label: 'Enforcement' },
     { id: 'monitoring', label: 'Monitoring' },
-    { id: 'authentication', label: 'Authentication' },
+    { id: 'apiSettings', label: 'API Settings' },
   ];
 
   const renderTabContent = () => {
@@ -148,8 +164,8 @@ const TabsView: React.FC<TabsViewProps> = ({ activeTab, setActiveTab, onIdentify
         return <InfringementView onInfringement={onInfringement} />;
       case 'monitoring':
         return <MonitoringView />;
-      case 'authentication':
-        return <AuthenticationView />;
+      case 'apiSettings':
+        return <ApiSettingsView />;
       default:
         return null;
     }

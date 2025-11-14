@@ -3,7 +3,6 @@ import { ActivityLogEntry, AudioData, SongDetails, UsageResult } from '../../typ
 import { identifySong, findSongUsage } from '../../services/geminiService';
 import { identifySongWithAcrCloud } from '../../services/acrcloudService';
 import { acrCloudCredentials } from '../AcrCloudProjectInfo';
-import ConfirmationDialog from '../ConfirmationDialog';
 import BroadcastIcon from '../icons/BroadcastIcon';
 import LiveIndicator from '../LiveIndicator';
 import CheckCircleIcon from '../icons/CheckCircleIcon';
@@ -18,10 +17,11 @@ import MusicIcon from '../icons/MusicIcon';
 
 const MonitoringView: React.FC = () => {
   const [isMonitoring, setIsMonitoring] = useState(false);
+  const [includeCovers, setIncludeCovers] = useState(false);
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
   const [selectedEntry, setSelectedEntry] = useState<ActivityLogEntry | null>(null);
-  const [showConfirmation, setShowConfirmation] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const monitoringIntervalRef = useRef<number | null>(null);
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
   const [usageResult, setUsageResult] = useState<UsageResult | null>(null);
   const [isFindingUsage, setIsFindingUsage] = useState(false);
@@ -52,23 +52,28 @@ const MonitoringView: React.FC = () => {
     try {
       const audioData = await handleBlobToBase64(audioBlob);
       
-      // Step 1: Identify with ACRCloud
       const acrResult = await identifySongWithAcrCloud(audioData, acrCloudCredentials);
 
-      // Step 2: If match, enrich with Gemini
-      if (acrResult.match && acrResult.title && acrResult.artist) {
+      if (acrResult.match && acrResult.isrc && acrResult.title && acrResult.artist) {
           const enrichedResult = await identifySong(audioData, {
-              title: acrResult.title,
-              artist: acrResult.artist,
-              album: acrResult.album || '',
+              details: {
+                title: acrResult.title,
+                artist: acrResult.artist,
+                album: acrResult.album || '',
+                isrc: acrResult.isrc,
+              },
+              includeCovers: includeCovers
           });
           result = {
-              ...enrichedResult,
               ...acrResult,
+              ...enrichedResult,
               match: true,
           };
+      } else if (includeCovers) {
+          result = await identifySong(audioData, { includeCovers: true });
       } else {
-        result = acrResult as SongDetails;
+        // Fix: Removed redundant cast to SongDetails as identifySongWithAcrCloud now correctly returns SongDetails type.
+        result = acrResult;
       }
       
       const newEntry: ActivityLogEntry = {
@@ -82,7 +87,7 @@ const MonitoringView: React.FC = () => {
     } catch (error) {
       console.error("Error identifying song during monitoring:", error);
     }
-  }, []);
+  }, [includeCovers]);
 
   const stopMonitoring = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
@@ -95,14 +100,12 @@ const MonitoringView: React.FC = () => {
     if (isMonitoring) return;
 
     try {
-      // 1. Request the media stream using the currently selected device ID.
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined
         }
       });
       
-      // 2. After permissions are granted, refresh the device list to get accurate labels.
       await refreshDevices();
       
       setAudioStream(stream);
@@ -120,14 +123,31 @@ const MonitoringView: React.FC = () => {
       };
       
       recorder.onstop = () => {
+         if (monitoringIntervalRef.current) {
+            clearInterval(monitoringIntervalRef.current);
+            monitoringIntervalRef.current = null;
+         }
          stream.getTracks().forEach(track => track.stop());
          setAudioStream(null);
       };
 
-      recorder.start(10000);
+      // Start recording. Chunks will be generated when requestData() is called.
+      recorder.start();
+
+      // Set up a timer to request an audio chunk every 10 seconds.
+      monitoringIntervalRef.current = window.setInterval(() => {
+          if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+              mediaRecorderRef.current.requestData();
+          }
+      }, 10000);
 
     } catch (err) {
       console.error("Error accessing microphone:", err);
+      // Ensure cleanup if setup fails after interval is set
+      if (monitoringIntervalRef.current) {
+        clearInterval(monitoringIntervalRef.current);
+        monitoringIntervalRef.current = null;
+      }
       alert("Could not access microphone. Please check permissions.");
       setIsMonitoring(false);
     }
@@ -138,7 +158,7 @@ const MonitoringView: React.FC = () => {
     if (isMonitoring) {
       stopMonitoring();
     } else {
-      setShowConfirmation(true);
+      startMonitoring();
     }
   };
   
@@ -155,15 +175,6 @@ const MonitoringView: React.FC = () => {
           setIsFindingUsage(false);
       }
   }
-
-  const handleConfirmStart = () => {
-    setShowConfirmation(false);
-    startMonitoring();
-  };
-
-  const handleCancelStart = () => {
-    setShowConfirmation(false);
-  };
 
   const selectedDevice = audioDevices.find(d => d.deviceId === selectedDeviceId);
   
@@ -199,31 +210,28 @@ const MonitoringView: React.FC = () => {
       <h2 className="text-2xl font-bold text-center text-blue-300 mb-2">Live Broadcast Monitoring</h2>
       <p className="text-center text-slate-400 mb-6">Continuously analyzing audio stream in 10-second intervals.</p>
       
-      {audioDevices.length > 1 && (
-        isMonitoring ? (
-          <div className="mb-4">
-            <label htmlFor="audio-source-display" className="text-xs text-slate-400 mb-2 block">
-              Monitoring with Microphone
-            </label>
-            <div className="relative">
-              <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">
-                <BroadcastIcon className="w-5 h-5" />
-              </div>
-              <div
-                id="audio-source-display"
-                className="w-full bg-slate-800/50 border border-slate-700 rounded-lg pl-10 pr-4 py-2.5 text-slate-300 truncate"
-              >
-                {selectedDevice?.label || `Default Device`}
-              </div>
-            </div>
-          </div>
-        ) : (
+      {!isMonitoring && audioDevices.length > 1 && (
           <AudioDeviceSelector 
             devices={audioDevices}
             selectedDeviceId={selectedDeviceId}
             onChange={setSelectedDeviceId}
           />
-        )
+      )}
+
+      {!isMonitoring && (
+         <div className="flex items-center justify-center gap-2 my-4">
+            <input
+              type="checkbox"
+              id="monitor-include-covers"
+              checked={includeCovers}
+              onChange={(e) => setIncludeCovers(e.target.checked)}
+              disabled={isMonitoring}
+              className="form-checkbox h-4 w-4 rounded bg-slate-700 border-slate-600 text-purple-500 focus:ring-purple-500 focus:ring-offset-slate-900 cursor-pointer"
+            />
+            <label htmlFor="monitor-include-covers" className="text-sm text-slate-300 cursor-pointer select-none">
+              Include cover songs & remixes
+            </label>
+          </div>
       )}
       
       <button
@@ -296,6 +304,7 @@ const MonitoringView: React.FC = () => {
                       </div>
                       <p className="text-slate-300">{selectedEntry.result.artist}</p>
                       <p className="text-xs text-slate-400">Album: {selectedEntry.result.album || 'N/A'}</p>
+                      {selectedEntry.result.reasoning && <p className="text-xs text-purple-300 bg-purple-900/40 p-2 rounded-md mt-2">{selectedEntry.result.reasoning}</p>}
                     </div>
 
                     <hr className="border-slate-700" />
@@ -367,16 +376,6 @@ const MonitoringView: React.FC = () => {
         </div>
       </div>
 
-      {showConfirmation && (
-        <ConfirmationDialog
-          icon={<BroadcastIcon className="w-8 h-8" />}
-          title="Start Live Monitoring?"
-          message="This will continuously use your microphone to analyze the audio stream in 10-second intervals to identify songs. Are you sure you want to proceed?"
-          confirmText="Start Monitoring"
-          onConfirm={handleConfirmStart}
-          onCancel={handleCancelStart}
-        />
-      )}
        <style>{`
         @keyframes fade-in {
           from { opacity: 0; }

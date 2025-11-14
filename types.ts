@@ -41,7 +41,13 @@ export interface UsageResult {
   sources: GroundingChunk[];
 }
 
-export type ApiResult = SongDetails | InfringementAnalysis | UsageResult;
+export interface SpeechTranscription {
+  transcription: string;
+  language: string;
+  summary?: string;
+}
+
+export type ApiResult = SongDetails | InfringementAnalysis | UsageResult | SpeechTranscription;
 
 export interface ActivityLogEntry {
   id: string;
@@ -80,7 +86,7 @@ export const songDetailsSchema = {
     },
     publisher: { type: Type.STRING, description: "The music publisher." },
     source: { type: Type.STRING, description: "The source of the metadata, e.g., the record label or music group." },
-    reasoning: { type: Type.STRING, description: "A brief explanation if no match is found." }
+    reasoning: { type: Type.STRING, description: "A brief explanation if no match is found, or a note if the track is a cover/remix." }
   },
   required: ["match"],
 };
@@ -103,4 +109,14 @@ export const infringementAnalysisSchema = {
         }
     },
     required: ["isInfringing", "confidence", "summary", "similarities", "differences"]
+};
+
+export const speechTranscriptionSchema = {
+  type: Type.OBJECT,
+  properties: {
+    transcription: { type: Type.STRING, description: "The full transcribed text from the audio." },
+    language: { type: Type.STRING, description: "The detected language of the speech (e.g., 'English', 'Spanish')." },
+    summary: { type: Type.STRING, description: "A brief summary of the transcribed text, if applicable." },
+  },
+  required: ["transcription", "language"],
 };

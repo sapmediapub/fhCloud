@@ -67,12 +67,12 @@ const bufferToWav = (buffer: AudioBuffer): Blob => {
 const AudioInput: React.FC<AudioInputProps> = ({ onAudioCaptured }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
-  const [countdown, setCountdown] = useState(10);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const countdownIntervalRef = useRef<number | null>(null);
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const stopRecordingTimeoutRef = useRef<number | null>(null);
+  const isCancelledRef = useRef(false);
 
   const { audioDevices, selectedDeviceId, setSelectedDeviceId, refreshDevices } = useAudioDevices();
 
@@ -134,17 +134,20 @@ const AudioInput: React.FC<AudioInputProps> = ({ onAudioCaptured }) => {
   };
   
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    if (stopRecordingTimeoutRef.current) {
+      clearTimeout(stopRecordingTimeoutRef.current);
+      stopRecordingTimeoutRef.current = null;
+    }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
     }
-     if (countdownIntervalRef.current) {
-      clearInterval(countdownIntervalRef.current);
-    }
     setIsRecording(false);
-    setCountdown(10);
-    audioStream?.getTracks().forEach(track => track.stop());
-    setAudioStream(null);
-  }
+  };
+
+  const handleCancelRecording = () => {
+    isCancelledRef.current = true;
+    stopRecording();
+  };
 
   const startRecording = async () => {
     try {
@@ -156,6 +159,7 @@ const AudioInput: React.FC<AudioInputProps> = ({ onAudioCaptured }) => {
       await refreshDevices(); // After permission, labels are available. Refresh device list.
       setAudioStream(stream);
       setIsRecording(true);
+      isCancelledRef.current = false;
       audioChunksRef.current = [];
 
       const recorder = new MediaRecorder(stream);
@@ -166,43 +170,44 @@ const AudioInput: React.FC<AudioInputProps> = ({ onAudioCaptured }) => {
       };
 
       recorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            const base64String = (reader.result as string).split(',')[1];
-            onAudioCaptured({ mimeType: audioBlob.type, data: base64String });
-        };
-        reader.readAsDataURL(audioBlob);
+        // Stop media tracks to turn off mic light.
         stream.getTracks().forEach(track => track.stop());
         setAudioStream(null);
+
+        if (!isCancelledRef.current) {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          if (audioBlob.size > 0) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const base64String = (reader.result as string).split(',')[1];
+                onAudioCaptured({ mimeType: audioBlob.type, data: base64String });
+            };
+            reader.readAsDataURL(audioBlob);
+          }
+        }
       };
 
       recorder.start();
       
-      countdownIntervalRef.current = window.setInterval(() => {
-        setCountdown(prev => prev - 1);
-      }, 1000);
-
-      setTimeout(() => {
+      stopRecordingTimeoutRef.current = window.setTimeout(() => {
         stopRecording();
       }, 10000);
 
     } catch (err) {
       console.error("Error accessing microphone:", err);
       alert("Could not access microphone. Please check permissions.");
+      setIsRecording(false);
     }
   };
   
+  // Cleanup effect for timeout on component unmount
   useEffect(() => {
-      if (countdown <= 0 && isRecording) {
-          stopRecording();
-      }
       return () => {
-          if (countdownIntervalRef.current) {
-              clearInterval(countdownIntervalRef.current);
+          if (stopRecordingTimeoutRef.current) {
+              clearTimeout(stopRecordingTimeoutRef.current);
           }
       }
-  }, [countdown, isRecording]);
+  }, []);
 
   const handleUploadClick = () => {
     fileInputRef.current?.click();
@@ -212,10 +217,15 @@ const AudioInput: React.FC<AudioInputProps> = ({ onAudioCaptured }) => {
   if (isRecording) {
     return (
       <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-purple-500 rounded-lg bg-slate-800/50 transition-all duration-300 min-h-[160px]">
-        <h3 className="text-lg font-semibold text-white mb-2">Recording...</h3>
-        <div className="text-4xl font-bold text-purple-400 mb-4">{countdown}</div>
+        <h3 className="text-lg font-semibold text-white mb-4">Listening...</h3>
+        <div className="relative w-20 h-20 mb-4">
+          <div className="absolute inset-0 bg-purple-600 rounded-full animate-ping opacity-60"></div>
+          <div className="relative flex items-center justify-center w-full h-full bg-purple-700 rounded-full">
+            <MicrophoneIcon className="w-10 h-10 text-white" />
+          </div>
+        </div>
         <AudioVisualizer stream={audioStream} />
-        <button onClick={stopRecording} className="mt-4 text-sm text-slate-400 hover:text-white">Cancel</button>
+        <button onClick={handleCancelRecording} className="mt-4 text-sm text-slate-400 hover:text-white">Cancel</button>
       </div>
     );
   }

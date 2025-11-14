@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ApiResult, InfringementAnalysis, SongDetails, UsageResult } from '../types';
+import { ApiResult, InfringementAnalysis, SongDetails, SpeechTranscription, UsageResult } from '../types';
 import ExclamationTriangleIcon from './icons/ExclamationTriangleIcon';
 import ShieldCheckIcon from './icons/ShieldCheckIcon';
 import FindUsageIcon from './icons/FindUsageIcon';
@@ -17,6 +17,7 @@ interface ResultsDisplayProps {
 const isSongDetails = (res: ApiResult): res is SongDetails => 'match' in res;
 const isInfringement = (res: ApiResult): res is InfringementAnalysis => 'isInfringing' in res;
 const isUsageResult = (res: ApiResult): res is UsageResult => 'sources' in res;
+const isSpeechTranscription = (res: ApiResult): res is SpeechTranscription => 'transcription' in res;
 
 const SongDetailsView: React.FC<{result: SongDetails, onFindUsage: (title: string, artist: string) => void, onBack: () => void}> = ({ result, onFindUsage, onBack }) => {
     const [showCredits, setShowCredits] = useState(false);
@@ -30,7 +31,7 @@ const SongDetailsView: React.FC<{result: SongDetails, onFindUsage: (title: strin
                     onClick={onBack} 
                     className="w-full mt-8 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-lg font-semibold hover:opacity-90 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 focus-visible:ring-white"
                 >
-                    Identify Another Song
+                    Identify Another Clip
                 </button>
             </div>
         )
@@ -58,6 +59,12 @@ const SongDetailsView: React.FC<{result: SongDetails, onFindUsage: (title: strin
                     )}
                 </div>
             </div>
+
+            {result.reasoning && (
+                <div className="mt-4 p-3 bg-purple-900/40 text-purple-300 text-sm rounded-lg border border-purple-500/30">
+                    <p><strong>Analysis Note:</strong> {result.reasoning}</p>
+                </div>
+            )}
 
             <hr className="border-slate-700 my-6" />
 
@@ -115,7 +122,7 @@ const SongDetailsView: React.FC<{result: SongDetails, onFindUsage: (title: strin
                     onClick={onBack} 
                     className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-lg font-semibold hover:opacity-90 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 focus-visible:ring-white"
                 >
-                    Identify Another Song
+                    Identify Another Clip
                 </button>
             </div>
         </div>
@@ -217,6 +224,58 @@ const UsageResultView: React.FC<{result: UsageResult, onBack: () => void}> = ({ 
     )
 }
 
+const SpeechTranscriptionView: React.FC<{result: SpeechTranscription, onBack: () => void}> = ({ result, onBack }) => {
+  return (
+    <div>
+      <h2 className="text-2xl font-bold text-center text-blue-300 mb-4">Transcription Result</h2>
+      <div className="bg-slate-900/50 rounded-lg p-6 border border-slate-700 space-y-4">
+          <div>
+              <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Detected Language</h3>
+              <p className="text-lg font-bold text-purple-400">{result.language}</p>
+          </div>
+          <hr className="border-slate-700" />
+          <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Transcription</h3>
+              <div className="max-h-60 overflow-y-auto custom-scrollbar p-3 bg-slate-800/50 rounded">
+                  <p className="text-slate-200 whitespace-pre-wrap font-serif leading-relaxed">{result.transcription}</p>
+              </div>
+          </div>
+          {result.summary && (
+            <>
+              <hr className="border-slate-700" />
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Summary</h3>
+                <p className="text-sm text-slate-300">{result.summary}</p>
+              </div>
+            </>
+          )}
+      </div>
+      <button 
+        onClick={onBack} 
+        className="w-full mt-8 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-lg font-semibold hover:opacity-90 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 focus-visible:ring-white"
+      >
+        Transcribe Another Clip
+      </button>
+       <style>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #475569;
+          border-radius: 4px;
+        }
+        .custom-scrollbar {
+          scrollbar-width: thin;
+          scrollbar-color: #475569 transparent;
+        }
+      `}</style>
+    </div>
+  )
+}
+
 const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ result, onBack, onFindUsage }) => {
   if (!result) {
     return (
@@ -235,6 +294,7 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ result, onBack, onFindU
       {isSongDetails(result) && <SongDetailsView result={result} onFindUsage={onFindUsage} onBack={onBack} />}
       {isInfringement(result) && <InfringementView result={result} onBack={onBack}/>}
       {isUsageResult(result) && <UsageResultView result={result} onBack={onBack} />}
+      {isSpeechTranscription(result) && <SpeechTranscriptionView result={result} onBack={onBack} />}
 
       <style>{`
         @keyframes fade-in {
